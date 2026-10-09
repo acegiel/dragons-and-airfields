@@ -1,0 +1,2 @@
+SETUP_SECRET=replace-with-a-random-32-byte-secret
+RESEND_API_KEY=re_replace-with-your-email-api-key

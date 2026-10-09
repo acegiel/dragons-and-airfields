@@ -1,0 +1,23 @@
+{
+  "name": "dragons-and-airfields",
+  "version": "1.0.0",
+  "description": "Private asynchronous chess for Gideon and Grandpa",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.js",
+    "preview": "node scripts/preview.mjs",
+    "deploy": "wrangler deploy --config backend/wrangler.jsonc",
+    "setup": "node scripts/setup.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "esbuild": "^0.25.12"
+  },
+  "devDependencies": {
+    "wrangler": "^4.149.0"
+  }
+}

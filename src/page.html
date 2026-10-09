@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer"><meta name="api-url" content="">
+  <meta name="description" content="A private chess match for Gideon and Grandpa. Dragons meet a U.S. WWII airfield.">
+  <title>Dragons & Airfields · Gideon & Grandpa</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231b3441'/%3E%3Cpath d='m16 45 5-22 10 4 10-15 4 20 9 8-6 13-22 2Z' fill='%23ed966b'/%3E%3Ccircle cx='40' cy='34' r='3' fill='%23fff0c1'/%3E%3C/svg%3E">
+  <style>__STYLE__</style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">♞</span><div><h1>Dragons <span>&</span> Airfields</h1><p>Gideon vs. Grandpa</p></div></div>
+      <nav aria-label="Game tools"><button id="guide-button" class="icon-button" title="Piece guide" aria-label="Piece guide"><span aria-hidden="true">♘</span> Piece guide</button><button id="settings-button" class="icon-button" title="Email reminders" aria-label="Email reminders"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 5h18v14H3Z M3 5l9 7 9-7"/></svg><span>Reminders</span></button></nav>
+    </header>
+    <div id="mode-banner" class="mode-banner"></div>
+    <main class="game-layout">
+      <section class="play-area" aria-label="Chess table">
+        <div id="opponent" class="player-strip"></div>
+        <div class="board-stage"><div id="scenery"></div><div class="board-wrap"><div id="board" role="group" aria-label="Chessboard" aria-describedby="board-instructions"></div><div class="file-labels" id="file-labels" aria-hidden="true"></div><div class="rank-labels" id="rank-labels" aria-hidden="true"></div></div><div class="scene-caption" aria-hidden="true"><span>U.S. AIRFIELD</span><span>DRAGON STRONGHOLD</span></div></div>
+        <div id="you" class="player-strip own-player"></div>
+        <p id="board-instructions" class="sr-only">Use arrow keys to move between squares. Press Enter or Space to select a piece, then a highlighted destination. Press Escape to clear your selection.</p><div class="board-tip"><span id="board-tip">Select a piece, then a highlighted square.</span><button id="flip-board" class="text-button">Rotate board</button></div>
+      </section>
+      <aside class="game-sidebar">
+        <section id="turn-card" class="turn-card" aria-label="Turn status"></section>
+        <section class="score-card"><div class="section-heading"><h2>Score</h2><button id="history-button" class="text-button">History</button></div><div id="scoreboard"></div></section>
+        <section class="moves-card"><div class="section-heading"><h2>Moves</h2><span id="move-total"></span></div><div class="moves-labels"><span>#</span><span>White</span><span>Black</span></div><div id="move-list" class="move-list"></div></section>
+        <div id="game-actions" class="game-actions"></div>
+      </aside>
+    </main>
+    <footer><span>No turn time limit.</span></footer>
+  </div>
+  <dialog aria-labelledby="theme-title" id="theme-dialog" class="theme-dialog"><div class="dialog-body"><span class="eyebrow">COIN FLIP</span><div class="coin-icon" aria-hidden="true">♔</div><h2 id="theme-title"></h2><p>You play white. Choose dragons or the U.S. airfield.</p><div id="theme-options" class="theme-options"></div></div></dialog>
+  <dialog aria-labelledby="promotion-title" id="promotion-dialog"><div class="dialog-body"><h2 id="promotion-title">Promote your pawn</h2><p>Choose a queen, rook, bishop, or knight.</p><div id="promotion-options" class="promotion-options"></div><button class="secondary" data-close="promotion-dialog">Cancel</button></div></dialog>
+  <dialog aria-labelledby="guide-title" id="guide-dialog" class="wide-dialog"><div class="dialog-body"><button class="close-button" data-close="guide-dialog" aria-label="Close piece guide">×</button><h2 id="guide-title">Piece guide</h2><p>The badge shows the chess piece. Ivory bases are white; dark bases are black.</p><div id="piece-guide" class="piece-guide"></div></div></dialog>
+  <dialog aria-labelledby="email-title" id="settings-dialog"><form id="email-form" class="dialog-body"><button type="button" class="close-button" data-close="settings-dialog" aria-label="Close reminders">×</button><span class="eyebrow">TURN REMINDERS</span><h2 id="email-title">Your reminder email</h2><p>One email when your opponent’s move is ready, after their 30-second undo window.</p><label for="reminder-email">Email address</label><input id="reminder-email" type="email" required autocomplete="email"><p id="email-mode" class="small-note"></p><p id="email-error" class="sync-error" role="alert" hidden></p><button class="primary" type="submit">Save email</button></form></dialog>
+  <dialog aria-labelledby="history-title" id="history-dialog" class="wide-dialog"><div class="dialog-body"><button class="close-button" data-close="history-dialog" aria-label="Close history">×</button><h2 id="history-title">Game history</h2><div id="history-content"></div></div></dialog>
+  <dialog aria-labelledby="confirm-title" id="confirm-dialog"><div class="dialog-body"><h2 id="confirm-title">Resign this game?</h2><p id="resign-text"></p><div class="dialog-actions"><button class="secondary" data-close="confirm-dialog">Keep playing</button><button id="confirm-resign" class="danger">Resign game</button></div></div></dialog>
+  <p id="turn-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p><div id="toast" role="status" aria-live="polite" class="toast" hidden></div>
+  <script>__SCRIPT__</script>
+</body></html>

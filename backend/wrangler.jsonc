@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "dragons-and-airfields",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-09",
+  "durable_objects": {"bindings": [{"name":"FAMILY", "class_name":"ChessFamily"}]},
+  "migrations": [{"tag":"v1", "new_sqlite_classes":["ChessFamily"]}],
+  "vars": {
+    "PUBLIC_PAGE_URL": "https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/",
+    "API_URL": "https://dragons-and-airfields.YOUR-SUBDOMAIN.workers.dev",
+    "EMAIL_FROM": "Dragons & Airfields <chess@YOUR-VERIFIED-DOMAIN>"
+  }
+}
