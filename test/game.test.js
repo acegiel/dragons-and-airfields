@@ -16,22 +16,22 @@ test('server prevents wrong turns and illegal moves',()=>{
  const s=started();assert.throws(()=>action(s,'grandpa','move',{from:'e7',to:'e5'}),/not your turn/);
  assert.throws(()=>action(s,'gideon','move',{from:'e2',to:'e5'}),/not legal/);assert.equal(s.game.moves.length,0);
 });
-test('pending moves are hidden from opponent and locked for 30 seconds',()=>{
+test('pending moves are hidden from opponent and locked for 10 seconds',()=>{
  const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);
  assert.equal(view(s,'gideon').game.pending.move.to,'e4');assert.equal(view(s,'grandpa').game.pending.move,undefined);
- assert.equal(engine(s.game).get('e2').type,'p');assert.equal(settle(s,30999),null);
- assert.throws(()=>action(s,'grandpa','move',{from:'e7',to:'e5'},30000),/undo window/);
- assert.equal(settle(s,31000).recipient,'grandpa');assert.equal(engine(s.game).get('e4').type,'p');
- assert.equal(settle(s,31001),null);
+ assert.equal(engine(s.game).get('e2').type,'p');assert.equal(settle(s,10999),null);
+ assert.throws(()=>action(s,'grandpa','move',{from:'e7',to:'e5'},10000),/undo window/);
+ assert.equal(settle(s,11000).recipient,'grandpa');assert.equal(engine(s.game).get('e4').type,'p');
+ assert.equal(settle(s,11001),null);
 });
 test('undo before expiry restores the board and creates no reminder',()=>{
- const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);action(s,'gideon','undo',{},30999);
+ const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);action(s,'gideon','undo',{},10999);
  assert.equal(s.game.pending,null);assert.equal(engine(s.game).turn(),'w');assert.equal(settle(s,50000),null);
 });
 test('opponent cannot undo; undo is rejected exactly at deadline',()=>{
  const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);
  assert.throws(()=>action(s,'grandpa','undo',{},2000),/Only your/);
- assert.throws(()=>action(s,'gideon','undo',{},31000),/closed/);
+ assert.throws(()=>action(s,'gideon','undo',{},11000),/closed/);
 });
 test('stale revisions reject concurrent writes',()=>{
  const s=started(),revision=s.revision;action(s,'gideon','move',{from:'e2',to:'e4'});
@@ -40,7 +40,7 @@ test('stale revisions reject concurrent writes',()=>{
 test('checkmate is finalized once after the undo window and updates shared history',()=>{
  const s=started();move(s,'gideon','f2','f3');move(s,'grandpa','e7','e5');move(s,'gideon','g2','g4');
  action(s,'grandpa','move',{from:'d8',to:'h4'});assert.equal(s.history.length,0);
- assert.equal(settle(s,31000),null);assert.equal(s.game.result.winner,'grandpa');assert.equal(s.game.result.reason,'Checkmate');
+ assert.equal(settle(s,11000),null);assert.equal(s.game.result.winner,'grandpa');assert.equal(s.game.result.reason,'Checkmate');
  assert.equal(view(s,'gideon').stats.gideon.losses,1);assert.equal(view(s,'grandpa').stats.grandpa.wins,1);
  settle(s,50000);assert.equal(s.history.length,1);action(s,'gideon','start');assert.equal(s.history.length,1);
 });

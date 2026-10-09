@@ -2,7 +2,7 @@ import { Chess } from 'chess.js';
 
 export const PLAYERS = ['gideon', 'grandpa'];
 export const NAMES = { gideon: 'Gideon', grandpa: 'Grandpa' };
-export const UNDO_MS = 30000;
+export const UNDO_MS = 10000;
 export const other = id => id === 'gideon' ? 'grandpa' : 'gideon';
 export class GameError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -63,7 +63,7 @@ export function act(state, player, action, data = {}, now = Date.now(), randomBi
     requireThat(game?.status === 'active', 'There is no active game.', 409);
     if (action === 'undo') {
       requireThat(game.pending && game.pending.player === player, 'Only your pending move can be undone.', 403);
-      requireThat(now < game.pending.readyAt, 'The 30-second undo window has closed.', 409);
+      requireThat(now < game.pending.readyAt, 'The 10-second undo window has closed.', 409);
       game.pending = null;
     } else {
       requireThat(!game.pending, 'Wait for the undo window to close.', 409);

@@ -7,7 +7,7 @@ A private asynchronous chess table for **Gideon and Grandpa**, with a U.S. WWII 
 - Separate private player links; no account creation or login screens.
 - One active game. A secure coin flip chooses white, who chooses their theme. The other player receives the remaining theme.
 - Legal moves enforced in the browser **and on the server**, including check, castling, en passant, and all four promotion choices.
-- Submitted moves remain undoable for exactly 30 seconds. The opponent cannot see or respond to the move until the server releases it. Closing the page does not cancel the timer.
+- Submitted moves remain undoable for exactly 10 seconds. The opponent cannot see or respond to the move until the server releases it. Closing the page does not cancel the timer.
 - One email to the next player after a move is released. No daily emails or turn deadlines. Checkmate and other game-ending moves do not send a turn reminder.
 - Shared win/loss/draw totals and dated game history, with resignations, draw offers, and rematches.
 - Click or tap to move, legal-move highlights, last-move highlights, keyboard navigation, board rotation, a piece guide, and reminder settings. Controls have larger tap targets; turn status appears above the board on tablets, and tablet tools retain their text labels.
@@ -37,7 +37,7 @@ You can also upload **only `index.html`** to an existing GitHub Pages site witho
 
 ## Activate shared play and turn emails
 
-GitHub Pages hosts static pages; shared state and timed email delivery run in the included Cloudflare Worker. A Durable Object stores the family game and runs the 30-second release alarm even when both browsers are closed. Resend sends the email. These services require your own accounts; no accounts were created and nothing was deployed or emailed during this build. Review the providers' current account limits and pricing before activation.
+GitHub Pages hosts static pages; shared state and timed email delivery run in the included Cloudflare Worker. A Durable Object stores the family game and runs the 10-second release alarm even when both browsers are closed. Resend sends the email. These services require your own accounts; no accounts were created and nothing was deployed or emailed during this build. Review the providers' current account limits and pricing before activation.
 
 1. Create or use a Cloudflare Workers account and a Resend account. Set up an approved sender with Resend. For production, verify your sending domain. A Resend test sender can have recipient restrictions.
 2. Run `npm ci` and `npx wrangler login` from this project.

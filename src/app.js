@@ -1,7 +1,8 @@
 import {Chess} from 'chess.js';
-import {act, initialState, settle, view, engine, NAMES, other, playerForColor, turnPlayer} from './game.js';
+import {act, initialState, settle, view, engine, NAMES, other, playerForColor, turnPlayer, UNDO_MS} from './game.js';
 import {pieceArt, scene, SYMBOLS, PIECE_NAMES, THEME_NAMES, ROLES} from './art.js';
 
+const UNDO_SECONDS=UNDO_MS/1000;
 const $=id=>document.getElementById(id);
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const params=new URLSearchParams(location.hash.slice(1));
@@ -75,7 +76,7 @@ async function action(name,data={}){
     else {
       settle(demoState);act(demoState,player,name,{revision:snapshot.revision,...data});saveDemo();applySnapshot(view(demoState,player));
     }
-    if(name==='move')notify('Move saved. You have 30 seconds to undo.');
+    if(name==='move')notify(`Move saved. You have ${UNDO_SECONDS} seconds to undo.`);
     if(name==='undo')notify('Move undone.');
     if(name==='email')notify(live?'Reminder email saved.':'Preview email saved. No email is sent in this preview.');
     return true;
@@ -145,7 +146,7 @@ function renderTurn(){
     html=`<span class="eyebrow">GAME OVER</span><h2>${game.result.winner?`${NAMES[game.result.winner]} wins`:'Draw'}</h2><p>${escape(game.result.reason)}.</p><button class="primary" data-action="start">Play again · Flip the coin</button>`;
   }else if(game.pending){
     const own=game.pending.player===player,seconds=Math.max(0,Math.ceil((game.pending.readyAt-now())/1000));
-    html=`<span class="eyebrow">${own?'UNDO AVAILABLE':'UNDO WINDOW'}</span><h2>${own?'Move saved':`Waiting for ${NAMES[game.pending.player]}`}</h2><p>${own?'You can undo for 30 seconds.':'Their move will appear when the 30-second undo window closes.'}</p>${own?`<div class="undo-row"><div class="undo-ring" id="undo-ring" style="--progress:${seconds/30*100}%"><span id="undo-seconds">${seconds}</span></div><button class="secondary" data-action="undo" ${seconds===0?'disabled':''}>Undo move</button></div>`:''}`;
+    html=`<span class="eyebrow">${own?'UNDO AVAILABLE':'UNDO WINDOW'}</span><h2>${own?'Move saved':`Waiting for ${NAMES[game.pending.player]}`}</h2><p>${own?`You can undo for ${UNDO_SECONDS} seconds.`:`Their move will appear when the ${UNDO_SECONDS}-second undo window closes.`}</p>${own?`<div class="undo-row"><div class="undo-ring" id="undo-ring" style="--progress:${seconds/UNDO_SECONDS*100}%"><span id="undo-seconds">${seconds}</span></div><button class="secondary" data-action="undo" ${seconds===0?'disabled':''}>Undo move</button></div>`:''}`;
   }else{
     const turn=turnPlayer(game);yourTurn=turn===player;
     const last=game.moves.at(-1);
@@ -205,7 +206,7 @@ window.addEventListener('online',refresh);
 window.addEventListener('storage',e=>{if(!live&&e.key===demoKey){try{demoState=JSON.parse(e.newValue)||initialState();applySnapshot(view(demoState,player));}catch{}}});
 setInterval(()=>{
   const pending=snapshot?.game?.pending;
-  if(pending){const seconds=Math.max(0,Math.ceil((pending.readyAt-now())/1000));if($('undo-seconds'))$('undo-seconds').textContent=seconds;if($('undo-ring'))$('undo-ring').style.setProperty('--progress',`${seconds/30*100}%`);if(seconds===0){document.querySelector('[data-action="undo"]')?.setAttribute('disabled','');refresh();}}
+  if(pending){const seconds=Math.max(0,Math.ceil((pending.readyAt-now())/1000));if($('undo-seconds'))$('undo-seconds').textContent=seconds;if($('undo-ring'))$('undo-ring').style.setProperty('--progress',`${seconds/UNDO_SECONDS*100}%`);if(seconds===0){document.querySelector('[data-action="undo"]')?.setAttribute('disabled','');refresh();}}
 },250);
 setInterval(()=>{if(!document.hidden)refresh();},5000);
 renderBoard();renderScore();refresh();
