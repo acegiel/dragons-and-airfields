@@ -11,12 +11,12 @@ A private asynchronous chess table for **Gideon and Grandpa**, with a U.S. WWII 
 - One email to the next player after a move is released. No daily emails or turn deadlines. Checkmate and other game-ending moves do not send a turn reminder.
 - Shared win/loss/draw totals and dated game history, with resignations, draw offers, and rematches.
 - Click or tap to move, legal-move highlights, last-move highlights, keyboard navigation, board rotation, a piece guide, and reminder settings. Controls have larger tap targets; turn status appears above the board on tablets, and tablet tools retain their text labels.
-- A light neutral gray background, stronger label contrast, visible keyboard focus, named dialogs, and spoken turn updates. Failed email saves keep the form and entered address open for retry.
+- A light neutral gray background, visible keyboard focus, larger boards on narrow screens, and a prominent undo countdown. The last move has distinct start and end marks. Failed email saves keep the form and entered address open for retry.
 - Default reminder address for both players: `acegielski@gmail.com`. Each player can change their own address later.
 
 ## Try the page first
 
-Open `index.html` in a browser. With no private-link fragment it runs a clearly labeled **preview on this device**. Use the Gideon/Grandpa controls to try both sides. Preview history is saved in that browser only; no email is sent and this mode cannot synchronize separate devices.
+Open `index.html` in a browser. With no private-link fragment it runs a clearly labeled **local preview**. Use the Gideon/Grandpa controls to try both sides. Preview history is saved in that browser only. Open tabs share one preview game, and the page warns if the browser cannot save progress. Online play and email require the setup below.
 
 For a local web preview:
 
@@ -71,12 +71,12 @@ All six WWII roles use U.S. designs, so British substitutes were unnecessary. Wh
 
 - The backend owns player identity, turn order, revision checking, game outcomes, move validation, and undo deadlines. Changing browser state cannot bypass these rules.
 - Both requests and Durable Object alarms settle moves. Alarms and outbox changes are persisted with game changes. Email attempts use stable idempotency keys, retry temporary failures, and discard reminders if their turn has already passed.
-- The browser polls every five seconds while visible and refreshes after returning to the page. The timer uses server time. A released move may appear a few seconds after its deadline depending on network and polling.
+- The browser polls every five seconds while visible and refreshes when the tab returns or the connection recovers. It discards stale reads and checks the latest game before another move if a save could not be confirmed. The timer uses server time; the next turn may appear a few seconds later depending on the connection.
 - Standard movement rules are implemented with bundled `chess.js` 1.4.0, without a CDN. Threefold repetition and the fifty-move rule automatically finish a game as a draw, appropriate for this family game.
 - Click/tap and keyboard movement are implemented; drag-and-drop is not required. Arrow keys move square focus, Enter or Space selects, and Escape clears selection.
 - There is no authentication provider, paid SMS integration, daily scheduler, analytics, or public game directory.
 
-Run `npm test` for the game and backend checks. The build was also validated with a Wrangler deployment dry run. A live end-to-end email check is still required after credentials are configured.
+Run `npm test` for the game, browser storage, and backend checks. A live email check is still required after credentials are configured.
 
 ## Source references
 

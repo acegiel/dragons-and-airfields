@@ -12,20 +12,23 @@
   <div class="app-shell">
     <header class="site-header">
       <div class="brand"><span class="brand-mark" aria-hidden="true">♞</span><div><h1>Dragons <span>&</span> Airfields</h1><p>Gideon vs. Grandpa</p></div></div>
-      <nav aria-label="Game tools"><button id="guide-button" class="icon-button" title="Piece guide" aria-label="Piece guide"><span aria-hidden="true">♘</span> Piece guide</button><button id="settings-button" class="icon-button" title="Email reminders" aria-label="Email reminders"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 5h18v14H3Z M3 5l9 7 9-7"/></svg><span>Reminders</span></button></nav>
+      <nav aria-label="Game tools">
+        <button id="guide-button" class="icon-button" type="button"><span class="tool-icon" aria-hidden="true">♘</span><span class="tool-label">Piece guide</span></button>
+        <button id="settings-button" class="icon-button" type="button" aria-label="Email reminders"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M3 5h18v14H3Z M3 5l9 7 9-7"/></svg><span class="tool-label">Reminders</span></button>
+      </nav>
     </header>
     <div id="mode-banner" class="mode-banner"></div>
     <main class="game-layout">
       <section class="play-area" aria-label="Chess table">
         <div id="opponent" class="player-strip"></div>
-        <div class="board-stage"><div id="scenery"></div><div class="board-wrap"><div id="board" role="group" aria-label="Chessboard" aria-describedby="board-instructions"></div><div class="file-labels" id="file-labels" aria-hidden="true"></div><div class="rank-labels" id="rank-labels" aria-hidden="true"></div></div><div class="scene-caption" aria-hidden="true"><span>U.S. AIRFIELD</span><span>DRAGON STRONGHOLD</span></div></div>
+        <div class="board-stage"><div id="scenery" aria-hidden="true"></div><div class="board-wrap"><div id="board" role="group" aria-label="Chessboard" aria-describedby="board-instructions"></div><div class="file-labels" id="file-labels" aria-hidden="true"></div><div class="rank-labels" id="rank-labels" aria-hidden="true"></div></div><div class="scene-caption" aria-hidden="true"><span>U.S. AIRFIELD</span><span>DRAGON STRONGHOLD</span></div></div>
         <div id="you" class="player-strip own-player"></div>
-        <p id="board-instructions" class="sr-only">Use arrow keys to move between squares. Press Enter or Space to select a piece, then a highlighted destination. Press Escape to clear your selection.</p><div class="board-tip"><span id="board-tip">Select a piece, then a highlighted square.</span><button id="flip-board" class="text-button">Rotate board</button></div>
+        <p id="board-instructions" class="sr-only">Use arrow keys to move between squares. Press Enter or Space to select a piece, then a highlighted destination. Press Escape to clear your selection.</p><div class="board-tip"><span id="board-tip"></span><button id="flip-board" class="text-button" type="button"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 8a7 7 0 0 1 12-1l2 5M4 12l2 5a7 7 0 0 0 12-1" stroke-linecap="round" stroke-linejoin="round"/></svg>Rotate board</button></div>
       </section>
       <aside class="game-sidebar">
-        <section id="turn-card" class="turn-card" aria-label="Turn status"></section>
+        <section id="turn-card" class="turn-card" aria-label="Turn status"><p class="loading-note">Loading game…</p></section>
         <section class="score-card"><div class="section-heading"><h2>Score</h2><button id="history-button" class="text-button">History</button></div><div id="scoreboard"></div></section>
-        <section class="moves-card"><div class="section-heading"><h2>Moves</h2><span id="move-total"></span></div><div class="moves-labels"><span>#</span><span>White</span><span>Black</span></div><div id="move-list" class="move-list"></div></section>
+        <section class="moves-card"><div class="section-heading"><h2>Moves</h2><span id="move-total"></span></div><div class="moves-labels" aria-hidden="true"><span>#</span><span>White</span><span>Black</span></div><div id="move-list" class="move-list" tabindex="0" role="region" aria-label="Move list"></div></section>
         <div id="game-actions" class="game-actions"></div>
       </aside>
     </main>

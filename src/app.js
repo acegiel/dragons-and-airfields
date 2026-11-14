@@ -1,6 +1,7 @@
 import {Chess} from 'chess.js';
-import {act, initialState, settle, view, engine, NAMES, other, playerForColor, turnPlayer, UNDO_MS} from './game.js';
+import {act, settle, view, engine, NAMES, other, playerForColor, UNDO_MS} from './game.js';
 import {pieceArt, scene, SYMBOLS, PIECE_NAMES, THEME_NAMES, ROLES} from './art.js';
+import {createPreviewStore, PREVIEW_KEY} from './preview-store.js';
 
 const UNDO_SECONDS=UNDO_MS/1000;
 const $=id=>document.getElementById(id);
@@ -9,16 +10,22 @@ const params=new URLSearchParams(location.hash.slice(1));
 const api=params.get('api')||document.querySelector('meta[name="api-url"]').content;
 const key=params.get('key')||'';
 const live=Boolean(api||key);
-let player='gideon', snapshot=null, demoState, selected=null, legal=[], orientation='w', rotated=false, busy=false, clockOffset=0, toastTimer, promoting=null, offline=false;
+const preview=live?null:createPreviewStore();
+let player='gideon', snapshot=null, selected=null, legal=[], orientation='w', rotated=false, busy=false, clockOffset=0, toastTimer, promoting=null, offline=false;
+let activeRead=null, releasedDeadline=null, connectionMessage='', lastStorageWarning='';
 let activeSquare='e2';
-const demoKey='dragons-airfields-preview-v1';
+let cachedGame, committedBoard, pendingBoard;
 const now=()=>Date.now()+clockOffset;
-try {demoState=JSON.parse(localStorage.getItem(demoKey))||initialState();} catch {demoState=initialState();}
-const saveDemo=()=>{try{localStorage.setItem(demoKey,JSON.stringify(demoState));}catch{}};
-const chessForView=()=>{
-  if(!snapshot?.game) return new Chess();
-  return engine(snapshot.game,Boolean(snapshot.game.pending?.move));
-};
+const secondsRemaining=deadline=>Math.max(0,Math.ceil((deadline-now())/1000));
+const ringProgress=seconds=>Math.min(100,seconds/UNDO_SECONDS*100)+'%';
+function boardFor(includePending=false){
+  const game=snapshot?.game??null;
+  if(cachedGame!==game){cachedGame=game;committedBoard=game?engine(game):new Chess();pendingBoard=null;}
+  if(includePending&&game?.pending?.move)return pendingBoard??=engine(game,true);
+  return committedBoard;
+}
+const chessForView=()=>boardFor(true);
+const currentTurn=game=>playerForColor(game,boardFor().turn());
 const themeForColor=color=>snapshot?.game?.themes?.[playerForColor(snapshot.game,color)]||(color==='w'?'dragons':'airfield');
 const colorForPlayer=p=>snapshot?.game?.white===p?'w':'b';
 function notify(text){$('toast').textContent=text;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,5000);}
@@ -41,69 +48,116 @@ function restoreFocus(selector){
   else target ||= document.querySelector('#turn-card .primary:not(:disabled)')||document.querySelector(`[data-square="${activeSquare}"]`);
   target?.focus({preventScroll:true});
 }
-function setBusy(value){busy=value;document.querySelectorAll('[data-action],.theme-choice,.promotion-choice,#email-form button[type="submit"]').forEach(b=>b.disabled=value);}
-async function request(path, data){
-  if(!api||!key) throw new Error('Open the private link made during setup.');
-  const service=new URL(api);
-  if(service.protocol!=='https:' && !(service.protocol==='http:'&&['localhost','127.0.0.1'].includes(service.hostname))) throw new Error('The game service address must use HTTPS.');
-  const result=await fetch(new URL(path,service),{method:data?'POST':'GET',headers:{Authorization:`Bearer ${key}`,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined,cache:'no-store',signal:AbortSignal.timeout(12000)});
-  const json=await result.json();
-  if(!result.ok){if(json.state) applySnapshot(json.state);throw new Error(json.error||'Could not reach your game.');}
-  return json;
+function updateEmailButton(){$('email-form').querySelector('button[type="submit"]').disabled=busy||offline||!snapshot;}
+function setBusy(value){busy=value;$('board').setAttribute('aria-busy',String(value));document.querySelectorAll('[data-action],.theme-choice,.promotion-choice,#resign-button,#confirm-resign').forEach(b=>b.disabled=value||offline);updateEmailButton();}
+class RequestError extends Error {
+  constructor(message,status,state){super(message);this.status=status;this.state=state;}
 }
+async function request(path, data, signal){
+  if(!api||!key) throw new RequestError('Open your private player link to join.',401);
+  let service;
+  try {service=new URL(api);} catch {throw new RequestError('This player link has an invalid game address.',400);}
+  if(service.protocol!=='https:' && !(service.protocol==='http:'&&['localhost','127.0.0.1'].includes(service.hostname))) throw new RequestError('The game service address must use HTTPS.',400);
+  const controller=new AbortController(),abort=()=>controller.abort();
+  if(signal?.aborted)abort();
+  signal?.addEventListener('abort',abort,{once:true});
+  const timeout=setTimeout(abort,12000);
+  try {
+    const result=await fetch(new URL(path,service),{method:data?'POST':'GET',headers:{Authorization:`Bearer ${key}`,...(data?{'Content-Type':'application/json'}:{})},body:data?JSON.stringify(data):undefined,cache:'no-store',redirect:'error',signal:controller.signal});
+    const json=await result.json().catch(()=>null);
+    if(!result.ok)throw new RequestError(json?.error||'The game service is unavailable.',result.status,json?.state);
+    if(!validSnapshot(json))throw new Error('Unrecognized game response');
+    return json;
+  } finally {clearTimeout(timeout);signal?.removeEventListener('abort',abort);}
+}
+function validSnapshot(data){return data&&Object.hasOwn(NAMES,data.player)&&Number.isSafeInteger(data.revision)&&Number.isFinite(data.serverNow)&&data.stats&&Array.isArray(data.history)&&(data.game===null||Array.isArray(data.game?.moves));}
 function applySnapshot(data){
+  if(live&&snapshot&&data.revision<snapshot.revision)return;
   const previous=snapshot?.game;
-  const changed=!snapshot||snapshot.revision!==data.revision||snapshot.player!==data.player||offline;
+  const changed=!snapshot||snapshot.revision!==data.revision||snapshot.player!==data.player||snapshot.emailWarning!==data.emailWarning||offline||(!live&&lastStorageWarning!==preview.warning);
   snapshot=data;player=data.player;clockOffset=data.serverNow-Date.now();offline=false;
+  if(!live)lastStorageWarning=preview.warning;
+  updateEmailButton();
   if(!changed)return;
   if(!rotated) orientation=snapshot.game?(colorForPlayer(player)):'w';
-  if(previous?.moves.length!==data.game?.moves.length||previous?.pending?.readyAt!==data.game?.pending?.readyAt){selected=null;legal=[];}
+  if(previous?.id!==data.game?.id||previous?.status!==data.game?.status||previous?.moves.length!==data.game?.moves.length||previous?.pending?.readyAt!==data.game?.pending?.readyAt){
+    selected=null;legal=[];promoting=null;
+    if($('promotion-dialog').open)$('promotion-dialog').close();
+  }
   render();
 }
-async function refresh(){
-  if(busy)return;
-  try {
-    if(live) applySnapshot(await request('/api/state'));
-    else {settle(demoState);saveDemo();applySnapshot(view(demoState,player));}
-  } catch(e){offline=true;renderBanner();if(!snapshot){$('turn-card').innerHTML=`<h2>Unable to open game</h2><p>${escape(e.message)}</p><button class="primary" id="retry-connection">Try again</button>`;$('retry-connection').onclick=refresh;}}
+function showConnectionError(error){
+  connectionMessage=error instanceof RequestError?error.message:'Couldn’t reach the game. Try reconnecting.';
+  offline=true;selected=null;legal=[];
+  if($('promotion-dialog').open)$('promotion-dialog').close();
+  if($('confirm-dialog').open)$('confirm-dialog').close();
+  updateEmailButton();render();
+}
+function refresh(){
+  if(busy||activeRead)return;
+  const read={controller:new AbortController()};activeRead=read;
+  return (async()=>{
+    try {
+      const data=live?await request('/api/state',undefined,read.controller.signal):await preview.update(state=>{settle(state);return view(state,player);});
+      if(activeRead===read&&!busy)applySnapshot(data);
+    } catch(e){if(live&&activeRead===read&&!busy)showConnectionError(e);}
+    finally{if(activeRead===read)activeRead=null;}
+  })();
 }
 async function action(name,data={}){
-  if(busy||!snapshot)return false;
+  if(busy||offline||!snapshot)return false;
   const focus=focusSelector();
-  setBusy(true);selected=null;legal=[];
+  if(live&&activeRead){activeRead.controller.abort();activeRead=null;}
+  const revision=snapshot.revision;
+  let reconcile=false;
+  setBusy(true);selected=null;legal=[];renderBoard();
   try {
-    if(live) applySnapshot(await request('/api/action',{action:name,revision:snapshot.revision,...data}));
+    if(live) applySnapshot(await request('/api/action',{action:name,revision,...data}));
     else {
-      settle(demoState);act(demoState,player,name,{revision:snapshot.revision,...data});saveDemo();applySnapshot(view(demoState,player));
+      const actor=player;
+      await preview.update(state=>{
+        settle(state);act(state,actor,name,{revision,...data});
+      });
+      applySnapshot(view(preview.read(),player));
     }
     if(name==='move')notify(`Move saved. You have ${UNDO_SECONDS} seconds to undo.`);
     if(name==='undo')notify('Move undone.');
     if(name==='email')notify(live?'Reminder email saved.':'Preview email saved. No email is sent in this preview.');
     return true;
-  } catch(e){notify(e.message);if(name==='email'){$('email-error').textContent=e.message;$('email-error').hidden=false;}if(!live)applySnapshot(view(demoState,player));return false;}
-  finally{setBusy(false);renderTurn();restoreFocus(focus);}
+  } catch(e){
+    let message=e.message;
+    if(!live)applySnapshot(view(preview.read(),player));
+    else if(validSnapshot(e.state))applySnapshot(e.state);
+    else {reconcile=true;showConnectionError(e);message='Couldn’t confirm that change. Check the game before trying again.';}
+    notify(message);
+    if(name==='email'){$('email-error').textContent=message;$('email-error').hidden=false;}
+    return false;
+  }
+  finally{setBusy(false);renderTurn();restoreFocus(focus);if(reconcile)refresh();}
 }
-function canMove(){const game=snapshot?.game;return !busy&&!offline&&game?.status==='active'&&!game.pending&&turnPlayer(game)===player;}
+function canMove(){const game=snapshot?.game;return !busy&&!offline&&game?.status==='active'&&!game.pending&&currentTurn(game)===player;}
 function renderBanner(){
-  if(live){$('mode-banner').innerHTML=`<div class="connection ${offline?'sync-error':''}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11V7a6 6 0 0 1 12 0v4M4 11h16v11H4Z"/></svg><span>${offline?'Connection lost. Reconnect to continue.':`Private board for <strong>${NAMES[player]}</strong>`}</span></div><span>${offline?'<button id="reconnect" class="text-button">Reconnect</button>':'Bookmark this player link.'}</span>`;if(offline)$('reconnect').onclick=refresh;}
-  else{$('mode-banner').innerHTML=`<div class="preview-label"><strong>Local preview</strong><small>One device. Shared play and email require setup.</small></div><div class="role-switch" aria-label="Preview player">${['gideon','grandpa'].map(p=>`<button data-player="${p}" aria-pressed="${player===p}" class="${player===p?'active':''}">${NAMES[p]}</button>`).join('')}</div>`;document.querySelectorAll('[data-player]').forEach(b=>b.onclick=()=>{player=b.dataset.player;selected=null;legal=[];rotated=false;applySnapshot(view(demoState,player));});}
+  if(live){$('mode-banner').innerHTML=`<div class="connection ${offline?'sync-error':''}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 11V7a6 6 0 0 1 12 0v4M4 11h16v11H4Z"/></svg><span>${offline?'Game disconnected':snapshot?`Private board for <strong>${NAMES[player]}</strong>`:'Opening private board…'}</span></div>${snapshot?'<span>Bookmark this player link.</span>':''}`;}
+  else{$('mode-banner').innerHTML=`<div class="preview-label"><strong>Local preview</strong><small>${escape(preview.warning||'Try both players on this device. Online play and email need setup.')}</small></div><div class="role-switch" aria-label="Preview player">${['gideon','grandpa'].map(p=>`<button data-player="${p}" aria-pressed="${player===p}" class="${player===p?'active':''}">${NAMES[p]}</button>`).join('')}</div>`;document.querySelectorAll('[data-player]').forEach(b=>b.onclick=()=>{if(busy||player===b.dataset.player)return;player=b.dataset.player;selected=null;legal=[];rotated=false;applySnapshot(view(preview.read(),player));});}
 }
 function renderPlayer(p,id){
   const game=snapshot?.game;const color=game?colorForPlayer(p):(p===player?'w':'b');
   const theme=game?.themes[p]||(color==='w'?'dragons':'airfield');
-  const captured=game?engine(game).history({verbose:true}).filter(m=>m.color===color&&m.captured).map(m=>SYMBOLS[m.captured]).join(''):'';
+  const captured=game?boardFor().history({verbose:true}).filter(m=>m.color===color&&m.captured).map(m=>SYMBOLS[m.captured]).join(''):'';
   $(id).innerHTML=`<div class="avatar">${pieceArt('k',theme,color,false)}</div><div class="player-info"><div class="player-name">${NAMES[p]}${p===player?'<small>YOU</small>':''}</div><div class="player-detail"><span class="side-stone ${color==='b'?'black':''}" aria-hidden="true"></span>${game?.themes[p]?`${color==='w'?'White':'Black'} · ${THEME_NAMES[theme]}`:'Game not started'}</div></div><span class="captured" aria-label="Captured pieces">${captured}</span>`;
 }
 function renderBoard(){
   const chess=chessForView(),game=snapshot?.game;
   const files=orientation==='w'?'abcdefgh':'hgfedcba',ranks=orientation==='w'?'87654321':'12345678';
-  const last=game?.pending?.move||game?.moves.at(-1),focus=document.activeElement?.dataset?.square;
+  const last=game?.pending?.move||game?.moves.at(-1),focus=document.activeElement?.dataset?.square,inCheck=chess.isCheck();
   let html='';
   for(const rank of ranks)for(const file of files){
     const square=file+rank,piece=chess.get(square),dark=(file.charCodeAt(0)-97+Number(rank))%2===1;
-    const checked=piece?.type==='k'&&piece.color===chess.turn()&&chess.isCheck();
+    const checked=inCheck&&piece?.type==='k'&&piece.color===chess.turn();
     const label=piece?`${square}, ${piece.color==='w'?'white':'black'} ${PIECE_NAMES[piece.type]}, ${ROLES[themeForColor(piece.color)][piece.type]}`:`${square}, empty`;
-    html+=`<button type="button" class="square ${dark?'dark':''} ${piece?'occupied':''} ${last&&(last.from===square||last.to===square)?'last-move':''} ${selected===square?'selected':''} ${legal.some(m=>m.to===square)?'legal':''} ${checked?'checked':''}" data-square="${square}" aria-label="${escape(label)}" aria-pressed="${selected===square}" tabindex="${square===activeSquare?'0':'-1'}" title="${escape(label)}">${piece?pieceArt(piece.type,themeForColor(piece.color),piece.color):''}</button>`;
+    const mark=last?.from===square?'last-move latest-from':last?.to===square?'last-move latest-to':'';
+    const squareLabel=label+(mark?(last.from===square?', last move from here':', last move to here'):'')+(checked?', in check':'');
+    html+=`<button type="button" class="square ${dark?'dark':''} ${piece?'occupied':''} ${mark} ${selected===square?'selected':''} ${legal.some(m=>m.to===square)?'legal':''} ${checked?'checked':''}" data-square="${square}" aria-label="${escape(squareLabel)}" aria-pressed="${selected===square}" tabindex="${square===activeSquare?'0':'-1'}" title="${escape(label)}">${piece?pieceArt(piece.type,themeForColor(piece.color),piece.color):''}</button>`;
   }
   $('board').innerHTML=html;
   $('file-labels').innerHTML=[...files].map(x=>`<span>${x}</span>`).join('');$('rank-labels').innerHTML=[...ranks].map(x=>`<span>${x}</span>`).join('');
@@ -120,7 +174,7 @@ function navigateBoard(e,square,files,ranks){
 }
 function selectSquare(square){
   activeSquare=square;
-  if(!canMove()){if(snapshot?.game?.pending?.player===player)notify('Undo your saved move to choose a different one.');return;}
+  if(!canMove()){if(!offline&&snapshot?.game?.pending?.player===player&&secondsRemaining(snapshot.game.pending.readyAt)>0)notify('Undo your saved move to choose a different one.');return;}
   const chess=chessForView(),piece=chess.get(square),possible=legal.filter(m=>m.to===square);
   if(selected&&possible.length){
     if(possible.some(m=>m.promotion)){promoting={from:selected,to:square};renderPromotion();dialog('promotion-dialog');}
@@ -139,16 +193,19 @@ function renderPromotion(){
 function renderTurn(){
   const focus=focusSelector();
   const game=snapshot?.game,chess=chessForView();let html='',yourTurn=false;
-  if(!game){html=`<span class="eyebrow">NEW GAME</span><h2>Start a game</h2><p>The coin flip decides who moves first and chooses a theme.</p><button class="primary" data-action="start">Flip the coin</button>`;}
+  if(offline)html=`<span class="eyebrow">CONNECTION</span><h2>${snapshot?'Game disconnected':'Unable to open game'}</h2><p>${escape(connectionMessage)}</p><button class="primary" id="reconnect">Reconnect</button>`;
+  else if(live&&!snapshot)html='<h2>Opening your board…</h2>';
+  else if(!game){html=`<span class="eyebrow">NEW GAME</span><h2>Start a game</h2><p>The coin flip decides who moves first and chooses a theme.</p><button class="primary" data-action="start">Flip the coin</button>`;}
   else if(game.status==='choosing'){
     html=`<span class="eyebrow">COIN FLIP</span><h2>${game.white===player?'Choose your pieces':`Waiting for ${NAMES[game.white]}`}</h2><p>${NAMES[game.white]} won the coin flip and plays white.</p>${game.white===player?'<button class="primary" id="choose-theme">Choose a theme</button>':''}`;
   }else if(game.status==='over'){
     html=`<span class="eyebrow">GAME OVER</span><h2>${game.result.winner?`${NAMES[game.result.winner]} wins`:'Draw'}</h2><p>${escape(game.result.reason)}.</p><button class="primary" data-action="start">Play again · Flip the coin</button>`;
   }else if(game.pending){
-    const own=game.pending.player===player,seconds=Math.max(0,Math.ceil((game.pending.readyAt-now())/1000));
-    html=`<span class="eyebrow">${own?'UNDO AVAILABLE':'UNDO WINDOW'}</span><h2>${own?'Move saved':`Waiting for ${NAMES[game.pending.player]}`}</h2><p>${own?`You can undo for ${UNDO_SECONDS} seconds.`:`Their move will appear when the ${UNDO_SECONDS}-second undo window closes.`}</p>${own?`<div class="undo-row"><div class="undo-ring" id="undo-ring" style="--progress:${seconds/UNDO_SECONDS*100}%"><span id="undo-seconds">${seconds}</span></div><button class="secondary" data-action="undo" ${seconds===0?'disabled':''}>Undo move</button></div>`:''}`;
+    const own=game.pending.player===player,seconds=secondsRemaining(game.pending.readyAt);
+    const move=game.pending.move;
+    html=`<span class="eyebrow">${own?'UNDO WINDOW':'WAITING'}</span><h2>${own?'Move saved':`Waiting for ${NAMES[game.pending.player]}`}</h2><p>${own&&move?`${escape(move.from)} → ${escape(move.to)}. You have ${UNDO_SECONDS} seconds to undo.`:'Their turn will finish when the undo timer runs out.'}</p>${own?`<div class="undo-row"><div class="undo-ring" id="undo-ring" style="--progress:${ringProgress(seconds)}"><span id="undo-seconds">${seconds}</span><span class="sr-only">seconds left</span></div><button class="secondary" data-action="undo" ${seconds===0?'disabled':''}>Undo move</button></div>`:''}`;
   }else{
-    const turn=turnPlayer(game);yourTurn=turn===player;
+    const turn=currentTurn(game);yourTurn=turn===player;
     const last=game.moves.at(-1);
     html=`<span class="eyebrow">${chess.turn()==='w'?'WHITE':'BLACK'} TO MOVE</span><h2>${yourTurn?'Your turn':`Waiting for ${NAMES[turn]}`}</h2><p>${chess.isCheck()?(yourTurn?'Your king is in check.':`${NAMES[turn]} is in check.`):(yourTurn?(last?`${NAMES[last.player]} played ${escape(last.san)}.`:'White moves first.'):(live?'You’ll get an email when their move is ready.':`${NAMES[turn]} is next.`))}</p>`;
     if(game.drawOffer===other(player))html+=`<p>${NAMES[other(player)]} offered a draw.</p><div class="draw-options"><button class="primary" data-action="accept-draw">Accept</button><button class="secondary" data-action="decline-draw">Keep playing</button></div>`;
@@ -156,14 +213,17 @@ function renderTurn(){
   }
   if(snapshot?.emailWarning)html+=`<p class="sync-error">${escape(snapshot.emailWarning)}</p>`;
   $('turn-card').innerHTML=html;$('turn-card').classList.toggle('your-turn',yourTurn);
+  $('turn-card').classList.toggle('has-pending',!offline&&game?.pending?.player===player);
+  $('turn-card').classList.toggle('is-offline',offline);
+  $('reconnect')?.addEventListener('click',refresh);
   $('choose-theme')?.addEventListener('click',()=>dialog('theme-dialog'));
-  $('game-actions').innerHTML=game?.status==='active'?`<button class="text-button" data-action="offer-draw" ${game.pending||game.drawOffer?'disabled':''}>Offer a draw</button><button class="text-button resign-button" id="resign-button" ${game.pending?'disabled':''}>Resign game</button>`:'';
+  $('game-actions').innerHTML=game?.status==='active'?`<button class="text-button" data-action="offer-draw" ${offline||game.pending||game.drawOffer?'disabled':''}>Offer a draw</button><button class="text-button resign-button" id="resign-button" ${offline||game.pending?'disabled':''}>Resign game</button>`:'';
   $('resign-button')?.addEventListener('click',()=>{$('resign-text').textContent=`${NAMES[other(player)]} wins if you resign.`;dialog('confirm-dialog');});
   document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>action(b.dataset.action));
-  const shouldChoose=game?.status==='choosing'&&game.white===player;
+  const shouldChoose=!offline&&game?.status==='choosing'&&game.white===player;
   if(shouldChoose){$('theme-title').textContent=`${NAMES[player]} goes first`;$('theme-options').innerHTML=['dragons','airfield'].map(theme=>`<button class="theme-choice" data-theme="${theme}">${pieceArt(theme==='dragons'?'q':'r',theme,'w',false)}<strong>${theme==='dragons'?'Dragons':'U.S. airfield'}</strong></button>`).join('');document.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>action('theme',{theme:b.dataset.theme}));dialog('theme-dialog');}
   else if($('theme-dialog').open)$('theme-dialog').close();
-  $('board-tip').textContent=game?.pending?'Waiting for the undo window to close.':canMove()?'Select a piece, then a highlighted square.':'';
+  $('board-tip').textContent=offline?'Reconnect to continue.':game?.pending?'The next turn starts when the undo timer runs out.':canMove()?'Select a piece, then a highlighted square.':game?.status==='active'?'You can look around while you wait.':'';
   const announcement=[...$('turn-card').querySelectorAll('h2,p')].map(e=>e.textContent).join(' ');
   if($('turn-announcement').textContent!==announcement)$('turn-announcement').textContent=announcement;
   restoreFocus(focus);
@@ -176,10 +236,11 @@ function renderScore(){
 }
 function renderMoves(){
   const game=snapshot?.game,moves=[...(game?.moves||[])],pending=game?.pending?.move;
-  if(pending){const chess=engine(game);const m=chess.move(pending);moves.push({san:m.san,pending:true});}
+  if(pending)moves.push({san:chessForView().history().at(-1),pending:true});
   $('move-total').textContent=`${game?.moves.length||0} played`;
   if(!moves.length){$('move-list').innerHTML='<p class="empty-moves">No moves yet.</p>';return;}
-  let html='';for(let i=0;i<moves.length;i+=2)html+=`<div class="move-row ${moves[i].pending||moves[i+1]?.pending?'pending-row':''}"><span>${i/2+1}.</span><span>${escape(moves[i].san)}${moves[i].pending?' *':''}</span><span>${escape(moves[i+1]?.san||'')}${moves[i+1]?.pending?' *':''}</span></div>`;
+  const cell=(move,index)=>`<span class="move-cell${move?.pending?' is-pending':index===moves.length-1&&move?' is-latest':''}">${escape(move?.san||'')}${move?.pending?' <small>Pending</small>':''}</span>`;
+  let html='';for(let i=0;i<moves.length;i+=2)html+=`<div class="move-row"><span>${i/2+1}.</span>${cell(moves[i],i)}${cell(moves[i+1],i+1)}</div>`;
   $('move-list').innerHTML=html;$('move-list').scrollTop=$('move-list').scrollHeight;
 }
 function render(){const focus=focusSelector();renderBanner();renderPlayer(other(player),'opponent');renderPlayer(player,'you');renderBoard();renderScore();renderMoves();renderTurn();restoreFocus(focus);}
@@ -203,10 +264,18 @@ document.querySelectorAll('[data-close]').forEach(b=>b.onclick=e=>{e.preventDefa
 $('theme-dialog').addEventListener('cancel',e=>e.preventDefault());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
 window.addEventListener('online',refresh);
-window.addEventListener('storage',e=>{if(!live&&e.key===demoKey){try{demoState=JSON.parse(e.newValue)||initialState();applySnapshot(view(demoState,player));}catch{}}});
+window.addEventListener('offline',()=>{if(live&&!busy){activeRead?.controller.abort();activeRead=null;showConnectionError(new Error('Offline'));}});
+window.addEventListener('storage',e=>{if(!live&&(e.key===PREVIEW_KEY||e.key===null))refresh();});
 setInterval(()=>{
   const pending=snapshot?.game?.pending;
-  if(pending){const seconds=Math.max(0,Math.ceil((pending.readyAt-now())/1000));if($('undo-seconds'))$('undo-seconds').textContent=seconds;if($('undo-ring'))$('undo-ring').style.setProperty('--progress',`${seconds/UNDO_SECONDS*100}%`);if(seconds===0){document.querySelector('[data-action="undo"]')?.setAttribute('disabled','');refresh();}}
+  if(pending){
+    const seconds=secondsRemaining(pending.readyAt);
+    if($('undo-seconds')&&$('undo-seconds').textContent!==String(seconds)){$('undo-seconds').textContent=seconds;$('undo-ring').style.setProperty('--progress',ringProgress(seconds));}
+    if(seconds===0){
+      document.querySelector('[data-action="undo"]')?.setAttribute('disabled','');
+      if(!busy&&!activeRead&&!offline&&releasedDeadline!==pending.readyAt){releasedDeadline=pending.readyAt;refresh();}
+    }
+  }
 },250);
 setInterval(()=>{if(!document.hidden)refresh();},5000);
-renderBoard();renderScore();refresh();
+render();refresh();
