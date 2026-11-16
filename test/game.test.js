@@ -1,10 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {act, initialState, settle, view, engine, turnPlayer, UNDO_MS} from '../src/game.js';
+import {act, initialState, turnNotification, view, engine, turnPlayer} from '../src/game.js';
 
 function action(s,p,a,d={},time=1000,bit=()=>0){return act(s,p,a,{revision:s.revision,...d},time,bit);}
 function started(white='gideon',theme='dragons') {const s=initialState();action(s,'grandpa','start',{},1000,()=>white==='gideon'?0:1);action(s,white,'theme',{theme});return s;}
-function move(s,p,from,to,time=1000,promotion){action(s,p,'move',{from,to,...(promotion?{promotion}:{})},time);return settle(s,time+UNDO_MS);}
+function move(s,p,from,to,time=1000,promotion){action(s,p,'move',{from,to,...(promotion?{promotion}:{})},time);return action(s,p,'confirm',{},time);}
 
 test('coin flip picks first player; only that player chooses a theme',()=>{
  const s=initialState();action(s,'gideon','start',{},1000,()=>1);assert.equal(s.game.white,'grandpa');
@@ -16,33 +16,42 @@ test('server prevents wrong turns and illegal moves',()=>{
  const s=started();assert.throws(()=>action(s,'grandpa','move',{from:'e7',to:'e5'}),/not your turn/);
  assert.throws(()=>action(s,'gideon','move',{from:'e2',to:'e5'}),/not legal/);assert.equal(s.game.moves.length,0);
 });
-test('pending moves are hidden from opponent and locked for 10 seconds',()=>{
+test('pending moves remain private until the owner explicitly ends the turn',()=>{
  const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);
- assert.equal(view(s,'gideon').game.pending.move.to,'e4');assert.equal(view(s,'grandpa').game.pending.move,undefined);
- assert.equal(engine(s.game).get('e2').type,'p');assert.equal(settle(s,10999),null);
- assert.throws(()=>action(s,'grandpa','move',{from:'e7',to:'e5'},10000),/undo window/);
- assert.equal(settle(s,11000).recipient,'grandpa');assert.equal(engine(s.game).get('e4').type,'p');
- assert.equal(settle(s,11001),null);
+ assert.equal(view(s,'gideon',86400000).game.pending.move.to,'e4');
+ assert.equal(view(s,'grandpa',86400000).game.pending.move,undefined);
+ assert.equal(engine(s.game).get('e2').type,'p');assert.equal(turnNotification(s),null);
+ assert.throws(()=>action(s,'grandpa','move',{from:'e7',to:'e5'},86400000),/pending move/);
+ assert.throws(()=>action(s,'grandpa','confirm',{},86400000),/Only your/);
+ assert.throws(()=>action(s,'grandpa','change-move',{},86400000),/Only your/);
+ action(s,'gideon','confirm',{},86400000);
+ assert.equal(engine(s.game).get('e4').type,'p');assert.equal(turnNotification(s).recipient,'grandpa');
+ assert.equal(s.game.moves[0].at,86400000);
+ assert.throws(()=>action(s,'gideon','confirm'),/Only your/);
+ assert.throws(()=>action(s,'gideon','change-move'),/Only your/);
 });
-test('undo before expiry restores the board and creates no reminder',()=>{
- const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);action(s,'gideon','undo',{},10999);
- assert.equal(s.game.pending,null);assert.equal(engine(s.game).turn(),'w');assert.equal(settle(s,50000),null);
+test('a player can change a saved move without a time limit',()=>{
+ const s=started();action(s,'gideon','move',{from:'e2',to:'e4'});
+ action(s,'gideon','change-move',{},86400000);
+ assert.equal(s.game.pending,null);assert.equal(engine(s.game).turn(),'w');assert.equal(turnNotification(s),null);
+ action(s,'gideon','move',{from:'d2',to:'d4'});action(s,'gideon','confirm');
+ assert.equal(engine(s.game).get('e2').type,'p');assert.equal(engine(s.game).get('d4').type,'p');
 });
-test('opponent cannot undo; undo is rejected exactly at deadline',()=>{
- const s=started();action(s,'gideon','move',{from:'e2',to:'e4'},1000);
- assert.throws(()=>action(s,'grandpa','undo',{},2000),/Only your/);
- assert.throws(()=>action(s,'gideon','undo',{},11000),/closed/);
+test('older pending moves require confirmation even after their former deadline',()=>{
+ const s=started();action(s,'gideon','move',{from:'e2',to:'e4'});s.game.pending.readyAt=11000;
+ assert.equal(view(s,'gideon',86400000).game.moves.length,0);
+ action(s,'gideon','confirm',{},86400000);assert.equal(s.game.moves.length,1);
 });
 test('stale revisions reject concurrent writes',()=>{
  const s=started(),revision=s.revision;action(s,'gideon','move',{from:'e2',to:'e4'});
  assert.throws(()=>act(s,'gideon','move',{revision,from:'d2',to:'d4'}),/game changed/);
 });
-test('checkmate is finalized once after the undo window and updates shared history',()=>{
+test('checkmate is finalized once after End turn and updates shared history',()=>{
  const s=started();move(s,'gideon','f2','f3');move(s,'grandpa','e7','e5');move(s,'gideon','g2','g4');
  action(s,'grandpa','move',{from:'d8',to:'h4'});assert.equal(s.history.length,0);
- assert.equal(settle(s,11000),null);assert.equal(s.game.result.winner,'grandpa');assert.equal(s.game.result.reason,'Checkmate');
+ action(s,'grandpa','confirm');assert.equal(turnNotification(s),null);assert.equal(s.game.result.winner,'grandpa');assert.equal(s.game.result.reason,'Checkmate');
  assert.equal(view(s,'gideon').stats.gideon.losses,1);assert.equal(view(s,'grandpa').stats.grandpa.wins,1);
- settle(s,50000);assert.equal(s.history.length,1);action(s,'gideon','start');assert.equal(s.history.length,1);
+ assert.throws(()=>action(s,'grandpa','confirm'),/no active game/);assert.equal(s.history.length,1);action(s,'gideon','start');assert.equal(s.history.length,1);
 });
 test('repetition survives reconstruction from stored moves',()=>{
  const s=started();for(let i=0;i<2;i++){move(s,'gideon','g1','f3');move(s,'grandpa','g8','f6');move(s,'gideon','f3','g1');move(s,'grandpa','f6','g8');}

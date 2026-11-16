@@ -1,13 +1,8 @@
-import {act, initialState, view, settle, NAMES, PLAYERS} from '../src/game.js';
+import {act, initialState, view, turnNotification, NAMES, PLAYERS} from '../src/game.js';
 
 const json = (body, status = 200) => Response.json(body, {status, headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const token = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
 const EMAIL_TIMEOUT_MS=10000, DELIVERY_LEASE_MS=30000;
-
-function releaseMove(room,now) {
-  const notification=settle(room.state,now);
-  if(notification) room.outbox.push({...notification,nextAttempt:now,attempts:0});
-}
 
 function discardObsoleteReminders(room) {
   const game=room.state.game, count=room.outbox.length;
@@ -42,7 +37,7 @@ export class ChessFamily {
   constructor(ctx, env) { this.ctx = ctx; this.env = env; this.queue = Promise.resolve(); }
   exclusive(fn) { const p=this.queue.then(fn); this.queue=p.catch(()=>{}); return p; }
   async schedule(tx, room) {
-    const times = [room.state.game?.pending?.readyAt, ...room.outbox.filter(m=>!m.failed).map(m=>m.nextAttempt)].filter(Boolean);
+    const times = room.outbox.filter(m=>!m.failed).map(m=>m.nextAttempt).filter(Boolean);
     if(times.length) await tx.setAlarm(Math.max(Date.now()+1,Math.min(...times)));
     else await tx.deleteAlarm();
   }
@@ -81,8 +76,15 @@ export class ChessFamily {
         await this.ctx.storage.transaction(async tx => {
           const room=await tx.get('room'), now=Date.now(), revision=room.state.revision;
           actionError=undefined;
-          releaseMove(room,now);
-          if(isAction) {try {act(room.state,player,data.action,data,now);} catch(e) {actionError=e;} }
+          if(isAction) {
+            try {
+              act(room.state,player,data.action,data,now);
+              if(data.action==='confirm') {
+                const notification=turnNotification(room.state);
+                if(notification)room.outbox.push({...notification,nextAttempt:now,attempts:0});
+              }
+            } catch(e) {actionError=e;}
+          }
           const remindersChanged=discardObsoleteReminders(room);
           if(room.state.revision!==revision||remindersChanged) {
             await tx.put('room',room); await this.schedule(tx,room);
@@ -98,7 +100,6 @@ export class ChessFamily {
     const message=await this.exclusive(()=>this.ctx.storage.transaction(async tx=>{
       const room=await tx.get('room'); if(!room) return null;
       const now=Date.now();
-      releaseMove(room,now);
       discardObsoleteReminders(room);
       const job=room.outbox.find(item=>!item.failed&&item.nextAttempt<=now);
       if(job) {
@@ -114,7 +115,7 @@ export class ChessFamily {
     }));
     if(!message) return;
 
-    // Mail delivery cannot hold up moves, undos, or reads of the board.
+    // Mail delivery cannot hold up moves, confirmations, or reads of the board.
     let failure;
     try {
       const response=await fetch('https://api.resend.com/emails',{

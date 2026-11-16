@@ -31,16 +31,16 @@ test('concurrent actions allow exactly one move',async()=>{
  const h=await household();const results=await Promise.all([h.request('gideon','move',{revision:2,from:'e2',to:'e4'}),h.request('gideon','move',{revision:2,from:'d2',to:'d4'})]);
  assert.deepEqual(results.map(r=>r.status),[200,409]);
 });
-test('polling a pending move leaves its stored deadline alone',async()=>{
+test('polling never confirms a pending move or schedules a release',async()=>{
  const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});
  const alarm=h.storage.alarm,writes=h.storage.writes;
  const response=await h.request('grandpa'),state=await response.json();
- assert.equal(response.status,200);assert.equal(state.game.pending.readyAt,alarm);assert.equal(state.game.pending.move,undefined);
+ assert.equal(response.status,200);assert.equal(alarm,null);assert.equal(state.game.moves.length,0);assert.equal(state.game.pending.move,undefined);
  assert.equal(h.storage.alarm,alarm);assert.equal(h.storage.writes,writes);
 });
-test('durable alarm commits after closing the page and sends one email',async()=>{
+test('confirmation queues one durable email even after closing the page',async()=>{
  const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});
- const room=await h.storage.get('room');room.state.game.pending.readyAt=Date.now()-1;await h.storage.put('room',room);
+ assert.equal((await h.request('gideon','confirm',{revision:3})).status,200);
  const originalFetch=globalThis.fetch,calls=[];globalThis.fetch=async(url,opts)=>{calls.push({url,opts});return Response.json({id:'mock-mail'});};
  try{
   const restarted=new ChessFamily({storage:h.storage},h.env);await restarted.alarm();await restarted.alarm();
@@ -48,12 +48,12 @@ test('durable alarm commits after closing the page and sends one email',async()=
   const final=await h.storage.get('room');assert.equal(final.state.game.moves.length,1);assert.equal(final.state.game.pending,null);assert.equal(final.outbox.length,0);
  }finally{globalThis.fetch=originalFetch;}
 });
-test('undone moves never enter the mail outbox',async()=>{
- const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});await h.request('gideon','undo',{revision:3});await h.family.alarm();
+test('changed moves never enter the mail outbox',async()=>{
+ const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});await h.request('gideon','change-move',{revision:3});await h.family.alarm();
  const room=await h.storage.get('room');assert.equal(room.state.game.moves.length,0);assert.equal(room.outbox.length,0);assert.equal(h.storage.alarm,null);
 });
 test('email failures retain an idempotent retry without losing the move',async()=>{
- const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});const room=await h.storage.get('room');room.state.game.pending.readyAt=Date.now()-1;await h.storage.put('room',room);
+ const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});assert.equal((await h.request('gideon','confirm',{revision:3})).status,200);
  const originalFetch=globalThis.fetch,calls=[];globalThis.fetch=async(url,opts)=>{calls.push(opts);return new Response('',{status:calls.length===1?503:200});};
  try {
   await h.family.alarm();const failed=await h.storage.get('room');
@@ -67,7 +67,7 @@ test('email failures retain an idempotent retry without losing the move',async()
 });
 test('a slow email does not block the next move or overwrite it later',async()=>{
  const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});
- const room=await h.storage.get('room');room.state.game.pending.readyAt=Date.now()-1;await h.storage.put('room',room);
+ assert.equal((await h.request('gideon','confirm',{revision:3})).status,200);
  const originalFetch=globalThis.fetch;
  let started,finish,timer;
  const startedSending=new Promise(resolve=>{started=resolve;}),sending=new Promise(resolve=>{finish=resolve;});
@@ -82,6 +82,18 @@ test('a slow email does not block the next move or overwrite it later',async()=>
   assert.equal(response.status,200);
   const pending=(await response.json()).game.pending;assert.equal(pending.move.to,'e5');
   finish(new Response('',{status:503}));await alarm;
-  const final=await h.storage.get('room');assert.deepEqual(final.state.game.pending,pending);assert.equal(final.outbox.length,0);assert.equal(h.storage.alarm,pending.readyAt);
+  const final=await h.storage.get('room');assert.deepEqual(final.state.game.pending,pending);assert.equal(final.outbox.length,0);assert.equal(h.storage.alarm,null);
  } finally {clearTimeout(timer);finish(new Response('',{status:200}));await alarm;globalThis.fetch=originalFetch;}
+});
+
+test('alarms and reloads never release an unconfirmed move, including legacy timers',async()=>{
+ const h=await household();await h.request('gideon','move',{revision:2,from:'e2',to:'e4'});
+ const room=await h.storage.get('room');room.state.game.pending.readyAt=Date.now()-86400000;await h.storage.put('room',room);
+ const restarted=new ChessFamily({storage:h.storage},h.env);await restarted.alarm();
+ const state=await (await h.request('gideon')).json();
+ assert.equal(state.game.moves.length,0);assert.equal(state.game.pending.move.to,'e4');assert.equal(h.storage.alarm,null);
+ assert.equal((await h.request('grandpa','confirm',{revision:3})).status,403);
+ const results=await Promise.all([h.request('gideon','confirm',{revision:3}),h.request('gideon','confirm',{revision:3})]);
+ assert.deepEqual(results.map(r=>r.status),[200,409]);
+ const final=await h.storage.get('room');assert.equal(final.state.game.moves.length,1);assert.equal(final.outbox.length,1);
 });

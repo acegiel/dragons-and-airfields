@@ -17,7 +17,7 @@ function readSaved(raw){
       !['choosing','active','over'].includes(game.status)||
       (game.status==='choosing'?!game.themes||game.moves.length!==0:!hasThemes(game))||
       (game.status==='over'&&(!game.result||(game.result.winner!==null&&!validPlayer(game.result.winner))))||
-      (game.pending&&(game.status!=='active'||!validPlayer(game.pending.player)||!Number.isFinite(game.pending.readyAt)||!game.pending.move)))throw new Error('Invalid saved board');
+      (game.pending&&(game.status!=='active'||!validPlayer(game.pending.player)||!game.pending.move)))throw new Error('Invalid saved board');
     engine(game,Boolean(game.pending));
   }
   return state;

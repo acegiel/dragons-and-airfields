@@ -7,11 +7,11 @@ A private asynchronous chess table for **Gideon and Grandpa**, with a U.S. WWII 
 - Separate private player links; no account creation or login screens.
 - One active game. A secure coin flip chooses white, who chooses their theme. The other player receives the remaining theme.
 - Legal moves enforced in the browser **and on the server**, including check, castling, en passant, and all four promotion choices.
-- Submitted moves remain undoable for exactly 10 seconds. The opponent cannot see or respond to the move until the server releases it. Closing the page does not cancel the timer.
-- One email to the next player after a move is released. No daily emails or turn deadlines. Checkmate and other game-ending moves do not send a turn reminder.
+- Choose a legal move, then select **End turn** to lock it in. **Change move** returns the piece so you can choose again. Unconfirmed moves stay private and wait indefinitely, including after closing the page. Confirmed moves cannot be taken back.
+- One email to the next player after a turn is confirmed. No daily emails or turn deadlines. Checkmate and other game-ending moves do not send a turn reminder.
 - Shared win/loss/draw totals and dated game history, with resignations, draw offers, and rematches.
 - Click or tap to move, legal-move highlights, last-move highlights, keyboard navigation, board rotation, a piece guide, and reminder settings. Controls have larger tap targets; turn status appears above the board on tablets, and tablet tools retain their text labels.
-- A light neutral gray background, visible keyboard focus, larger boards on narrow screens, and a prominent undo countdown. The last move has distinct start and end marks. Failed email saves keep the form and entered address open for retry.
+- A light neutral gray background, visible keyboard focus, larger boards on narrow screens, and prominent End turn and Change move buttons. The last move has distinct start and end marks. Failed email saves keep the form and entered address open for retry.
 - Default reminder address for both players: `acegielski@gmail.com`. Each player can change their own address later.
 
 ## Try the page first
@@ -37,7 +37,7 @@ You can also upload **only `index.html`** to an existing GitHub Pages site witho
 
 ## Activate shared play and turn emails
 
-GitHub Pages hosts static pages; shared state and timed email delivery run in the included Cloudflare Worker. A Durable Object stores the family game and runs the 10-second release alarm even when both browsers are closed. Resend sends the email. These services require your own accounts; no accounts were created and nothing was deployed or emailed during this build. Review the providers' current account limits and pricing before activation.
+GitHub Pages hosts static pages; shared state and timed email delivery run in the included Cloudflare Worker. A Durable Object stores the family game and delivers confirmed-turn emails even when both browsers are closed. Resend sends the email. These services require your own accounts; no accounts were created and nothing was deployed or emailed during this build. Review the providers' current account limits and pricing before activation.
 
 1. Create or use a Cloudflare Workers account and a Resend account. Set up an approved sender with Resend. For production, verify your sending domain. A Resend test sender can have recipient restrictions.
 2. Run `npm ci` and `npx wrangler login` from this project.
@@ -50,7 +50,7 @@ GitHub Pages hosts static pages; shared state and timed email delivery run in th
 6. Run `npm run deploy`. If the Workers URL differs from the `API_URL` setting, update that setting and redeploy.
 7. Set `SETUP_SECRET` in your local terminal environment to the same secret, then run `npm run setup -- https://your-service.workers.dev`. The script writes **private-links.json** locally. It is excluded from git and must remain private.
 8. Bookmark Gideon's link on his laptop and Grandpa's link on his devices. The fragments identify the players automatically and tell the page which game service to use. You do **not** need to edit or rebuild `index.html` to use these links.
-9. Verify one released move sends an email to `acegielski@gmail.com`. Later, open each player's **Reminders** setting to change that player's address.
+9. Verify one confirmed turn sends an email to `acegielski@gmail.com`. Later, open each player's **Reminders** setting to change that player's address.
 
 The setup endpoint is idempotent: rerunning it with the setup secret returns the same links and preserves the game. There is no public reset endpoint. Anyone holding a player's private link can play as that player; share it only with its intended player. URLs keep player keys in the fragment, away from GitHub request logs, and the page disables referrer transmission.
 
@@ -69,9 +69,9 @@ All six WWII roles use U.S. designs, so British substitutes were unnecessary. Wh
 
 ## Technical notes
 
-- The backend owns player identity, turn order, revision checking, game outcomes, move validation, and undo deadlines. Changing browser state cannot bypass these rules.
-- Both requests and Durable Object alarms settle moves. Alarms and outbox changes are persisted with game changes. Email attempts use stable idempotency keys, retry temporary failures, and discard reminders if their turn has already passed.
-- The browser polls every five seconds while visible and refreshes when the tab returns or the connection recovers. It discards stale reads and checks the latest game before another move if a save could not be confirmed. The timer uses server time; the next turn may appear a few seconds later depending on the connection.
+- The backend owns player identity, turn order, revision checking, game outcomes, move validation, and move confirmation. Changing browser state cannot bypass these rules.
+- Only the player’s End turn action commits a pending move. The confirmed move and its email job are saved together; alarms deliver email without committing moves. Email attempts use stable idempotency keys, retry temporary failures, and discard reminders if their turn has already passed.
+- The browser polls every five seconds while visible and refreshes when the tab returns or the connection recovers. It discards stale reads and checks the latest game before another move if a save could not be confirmed. A confirmed turn may appear on the other device a few seconds later depending on the connection.
 - Standard movement rules are implemented with bundled `chess.js` 1.4.0, without a CDN. Threefold repetition and the fifty-move rule automatically finish a game as a draw, appropriate for this family game.
 - Click/tap and keyboard movement are implemented; drag-and-drop is not required. Arrow keys move square focus, Enter or Space selects, and Escape clears selection.
 - There is no authentication provider, paid SMS integration, daily scheduler, analytics, or public game directory.

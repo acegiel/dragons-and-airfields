@@ -186,7 +186,8 @@ button svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke
 .turn-card.your-turn:not(.has-pending):not(.is-offline) .eyebrow { color: #275b61; }
 .turn-card h2 { margin: 5px 0 7px; font: 600 clamp(1.35rem, 2.6vw, 1.65rem)/1.15 Georgia, serif; }
 .turn-card p { margin-top: 5px; color: var(--muted); }
-.turn-card > :is(button, .undo-row, .draw-options) { margin-top: 12px; }
+
+.turn-card > :is(button, .draw-options) { margin-top: 12px; }
 .turn-card > .primary, .turn-card > .secondary { width: 100%; }
 .primary, .secondary, .danger {
   min-height: 46px; padding: 10px 15px; border: 1px solid transparent; border-radius: 9px;
@@ -197,17 +198,11 @@ button svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke
 .secondary { border-color: #d2dadd; background: var(--surface); color: var(--ink); }
 .danger { background: var(--red); color: white; }
 .danger:hover:not(:disabled) { background: #7e372f; }
-.undo-row { display: flex; align-items: center; gap: 12px; }
-.undo-row .secondary { flex: 1; border-color: #bd965c; color: #513b1c; }
-.undo-row .secondary:hover:not(:disabled) { background: #f5e7c9; }
-.undo-ring {
-  display: grid; place-items: center; flex: none; width: 55px; height: 55px; border-radius: 50%;
-  background: #e7dcc6; background: conic-gradient(var(--gold) clamp(0%, var(--progress, 100%), 100%), #e7dcc6 0);
-}
-#undo-seconds {
-  display: grid; place-items: center; width: 45px; height: 45px; border-radius: 50%;
-  background: var(--surface); color: #59411d; font-size: 1.25rem; font-weight: 750; font-variant-numeric: tabular-nums;
-}
+
+
+
+
+
 .draw-options { display: flex; flex-wrap: wrap; gap: 8px; }
 .draw-options button { flex: 1; }
 
@@ -330,7 +325,7 @@ dialog::backdrop { background: #142f3cb8; }
   .turn-card, .game-actions { grid-column: 1 / -1; }
   .turn-card { min-height: 0; padding: 12px 15px; }
   .turn-card > .primary, .turn-card > .secondary { width: auto; }
-  .undo-row { max-width: 250px; }
+
 }
 
 @media (max-width: 560px) {
@@ -364,3 +359,6 @@ dialog::backdrop { background: #142f3cb8; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+
+.confirm-move-actions { display: grid; gap: 10px; margin-top: 16px; }
+.confirm-move-actions button { width: 100%; min-height: 48px; }

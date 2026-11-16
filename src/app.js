@@ -1,9 +1,8 @@
 import {Chess} from 'chess.js';
-import {act, settle, view, engine, NAMES, other, playerForColor, UNDO_MS} from './game.js';
+import {act, view, engine, NAMES, other, playerForColor} from './game.js';
 import {pieceArt, scene, SYMBOLS, PIECE_NAMES, THEME_NAMES, ROLES} from './art.js';
 import {createPreviewStore, PREVIEW_KEY} from './preview-store.js';
 
-const UNDO_SECONDS=UNDO_MS/1000;
 const $=id=>document.getElementById(id);
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const params=new URLSearchParams(location.hash.slice(1));
@@ -11,13 +10,10 @@ const api=params.get('api')||document.querySelector('meta[name="api-url"]').cont
 const key=params.get('key')||'';
 const live=Boolean(api||key);
 const preview=live?null:createPreviewStore();
-let player='gideon', snapshot=null, selected=null, legal=[], orientation='w', rotated=false, busy=false, clockOffset=0, toastTimer, promoting=null, offline=false;
-let activeRead=null, releasedDeadline=null, connectionMessage='', lastStorageWarning='';
+let player='gideon', snapshot=null, selected=null, legal=[], orientation='w', rotated=false, busy=false, toastTimer, promoting=null, offline=false;
+let activeRead=null, connectionMessage='', lastStorageWarning='';
 let activeSquare='e2';
 let cachedGame, committedBoard, pendingBoard;
-const now=()=>Date.now()+clockOffset;
-const secondsRemaining=deadline=>Math.max(0,Math.ceil((deadline-now())/1000));
-const ringProgress=seconds=>Math.min(100,seconds/UNDO_SECONDS*100)+'%';
 function boardFor(includePending=false){
   const game=snapshot?.game??null;
   if(cachedGame!==game){cachedGame=game;committedBoard=game?engine(game):new Chess();pendingBoard=null;}
@@ -75,12 +71,12 @@ function applySnapshot(data){
   if(live&&snapshot&&data.revision<snapshot.revision)return;
   const previous=snapshot?.game;
   const changed=!snapshot||snapshot.revision!==data.revision||snapshot.player!==data.player||snapshot.emailWarning!==data.emailWarning||offline||(!live&&lastStorageWarning!==preview.warning);
-  snapshot=data;player=data.player;clockOffset=data.serverNow-Date.now();offline=false;
+  snapshot=data;player=data.player;offline=false;
   if(!live)lastStorageWarning=preview.warning;
   updateEmailButton();
   if(!changed)return;
   if(!rotated) orientation=snapshot.game?(colorForPlayer(player)):'w';
-  if(previous?.id!==data.game?.id||previous?.status!==data.game?.status||previous?.moves.length!==data.game?.moves.length||previous?.pending?.readyAt!==data.game?.pending?.readyAt){
+  if(previous?.id!==data.game?.id||previous?.status!==data.game?.status||previous?.moves.length!==data.game?.moves.length||JSON.stringify(previous?.pending)!==JSON.stringify(data.game?.pending)){
     selected=null;legal=[];promoting=null;
     if($('promotion-dialog').open)$('promotion-dialog').close();
   }
@@ -98,7 +94,7 @@ function refresh(){
   const read={controller:new AbortController()};activeRead=read;
   return (async()=>{
     try {
-      const data=live?await request('/api/state',undefined,read.controller.signal):await preview.update(state=>{settle(state);return view(state,player);});
+      const data=live?await request('/api/state',undefined,read.controller.signal):view(preview.read(),player);
       if(activeRead===read&&!busy)applySnapshot(data);
     } catch(e){if(live&&activeRead===read&&!busy)showConnectionError(e);}
     finally{if(activeRead===read)activeRead=null;}
@@ -116,12 +112,13 @@ async function action(name,data={}){
     else {
       const actor=player;
       await preview.update(state=>{
-        settle(state);act(state,actor,name,{revision,...data});
+        act(state,actor,name,{revision,...data});
       });
       applySnapshot(view(preview.read(),player));
     }
-    if(name==='move')notify(`Move saved. You have ${UNDO_SECONDS} seconds to undo.`);
-    if(name==='undo')notify('Move undone.');
+    if(name==='move')notify('Check your move, then select End turn.');
+    if(name==='confirm')notify('Turn ended.');
+    if(name==='change-move')notify('Choose a different move.');
     if(name==='email')notify(live?'Reminder email saved.':'Preview email saved. No email is sent in this preview.');
     return true;
   } catch(e){
@@ -174,7 +171,7 @@ function navigateBoard(e,square,files,ranks){
 }
 function selectSquare(square){
   activeSquare=square;
-  if(!canMove()){if(!offline&&snapshot?.game?.pending?.player===player&&secondsRemaining(snapshot.game.pending.readyAt)>0)notify('Undo your saved move to choose a different one.');return;}
+  if(!canMove()){if(!offline&&snapshot?.game?.pending?.player===player)notify('Select Change move to choose a different move.');return;}
   const chess=chessForView(),piece=chess.get(square),possible=legal.filter(m=>m.to===square);
   if(selected&&possible.length){
     if(possible.some(m=>m.promotion)){promoting={from:selected,to:square};renderPromotion();dialog('promotion-dialog');}
@@ -201,9 +198,8 @@ function renderTurn(){
   }else if(game.status==='over'){
     html=`<span class="eyebrow">GAME OVER</span><h2>${game.result.winner?`${NAMES[game.result.winner]} wins`:'Draw'}</h2><p>${escape(game.result.reason)}.</p><button class="primary" data-action="start">Play again · Flip the coin</button>`;
   }else if(game.pending){
-    const own=game.pending.player===player,seconds=secondsRemaining(game.pending.readyAt);
-    const move=game.pending.move;
-    html=`<span class="eyebrow">${own?'UNDO WINDOW':'WAITING'}</span><h2>${own?'Move saved':`Waiting for ${NAMES[game.pending.player]}`}</h2><p>${own&&move?`${escape(move.from)} → ${escape(move.to)}. You have ${UNDO_SECONDS} seconds to undo.`:'Their turn will finish when the undo timer runs out.'}</p>${own?`<div class="undo-row"><div class="undo-ring" id="undo-ring" style="--progress:${ringProgress(seconds)}"><span id="undo-seconds">${seconds}</span><span class="sr-only">seconds left</span></div><button class="secondary" data-action="undo" ${seconds===0?'disabled':''}>Undo move</button></div>`:''}`;
+    const own=game.pending.player===player,move=game.pending.move;
+    html=`<span class="eyebrow">${own?'REVIEW YOUR MOVE':'WAITING'}</span><h2>${own?'End your turn?':`Waiting for ${NAMES[game.pending.player]}`}</h2><p>${own&&move?`${escape(move.from)} → ${escape(move.to)}${move.promotion?` · ${PIECE_NAMES[move.promotion]}`:''}. End your turn to lock in this move.`:'Their move will appear when they end their turn.'}</p>${own?'<div class="confirm-move-actions"><button class="primary" data-action="confirm">End turn</button><button class="secondary" data-action="change-move">Change move</button></div>':''}`;
   }else{
     const turn=currentTurn(game);yourTurn=turn===player;
     const last=game.moves.at(-1);
@@ -223,7 +219,7 @@ function renderTurn(){
   const shouldChoose=!offline&&game?.status==='choosing'&&game.white===player;
   if(shouldChoose){$('theme-title').textContent=`${NAMES[player]} goes first`;$('theme-options').innerHTML=['dragons','airfield'].map(theme=>`<button class="theme-choice" data-theme="${theme}">${pieceArt(theme==='dragons'?'q':'r',theme,'w',false)}<strong>${theme==='dragons'?'Dragons':'U.S. airfield'}</strong></button>`).join('');document.querySelectorAll('[data-theme]').forEach(b=>b.onclick=()=>action('theme',{theme:b.dataset.theme}));dialog('theme-dialog');}
   else if($('theme-dialog').open)$('theme-dialog').close();
-  $('board-tip').textContent=offline?'Reconnect to continue.':game?.pending?'The next turn starts when the undo timer runs out.':canMove()?'Select a piece, then a highlighted square.':game?.status==='active'?'You can look around while you wait.':'';
+  $('board-tip').textContent=offline?'Reconnect to continue.':game?.pending?game.pending.player===player?'Check your move, then select End turn.':'Waiting for your opponent to end their turn.':canMove()?'Select a piece, then a highlighted square.':game?.status==='active'?'You can look around while you wait.':'';
   const announcement=[...$('turn-card').querySelectorAll('h2,p')].map(e=>e.textContent).join(' ');
   if($('turn-announcement').textContent!==announcement)$('turn-announcement').textContent=announcement;
   restoreFocus(focus);
@@ -266,16 +262,5 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();
 window.addEventListener('online',refresh);
 window.addEventListener('offline',()=>{if(live&&!busy){activeRead?.controller.abort();activeRead=null;showConnectionError(new Error('Offline'));}});
 window.addEventListener('storage',e=>{if(!live&&(e.key===PREVIEW_KEY||e.key===null))refresh();});
-setInterval(()=>{
-  const pending=snapshot?.game?.pending;
-  if(pending){
-    const seconds=secondsRemaining(pending.readyAt);
-    if($('undo-seconds')&&$('undo-seconds').textContent!==String(seconds)){$('undo-seconds').textContent=seconds;$('undo-ring').style.setProperty('--progress',ringProgress(seconds));}
-    if(seconds===0){
-      document.querySelector('[data-action="undo"]')?.setAttribute('disabled','');
-      if(!busy&&!activeRead&&!offline&&releasedDeadline!==pending.readyAt){releasedDeadline=pending.readyAt;refresh();}
-    }
-  }
-},250);
 setInterval(()=>{if(!document.hidden)refresh();},5000);
 render();refresh();

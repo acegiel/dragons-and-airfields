@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {act,settle} from '../src/game.js';
+import {act} from '../src/game.js';
 import {createPreviewStore,PREVIEW_KEY} from '../src/preview-store.js';
 
 function tabs(raw=null){
@@ -21,9 +21,11 @@ test('preview tabs reload before edits and idle polling never rewrites the game'
   assert.equal(result[0].status,'fulfilled');
   assert.match(result[1].reason.message,/game changed/);
   assert.equal(b.read().game.pending.move.to,'e4');
-  await b.update(state=>settle(state,10999));
+  b.read();
   assert.equal(browser.writes,3);
-  await Promise.all([a.update(state=>settle(state,11000)),b.update(state=>settle(state,11000))]);
+  assert.equal(browser.open().read().game.pending.move.to,'e4');
+  const confirmed=await Promise.allSettled([a.update(state=>act(state,'gideon','confirm',{revision:3},86400000)),b.update(state=>act(state,'gideon','confirm',{revision:3},86400000))]);
+  assert.deepEqual(confirmed.map(r=>r.status),['fulfilled','rejected']);
   assert.equal(browser.writes,4);
   assert.equal(JSON.parse(browser.raw).game.moves.length,1);
 });
@@ -32,7 +34,7 @@ test('a corrupt saved board does not crash the page or get overwritten by a read
   const browser=tabs('{"revision":7,"game":{}}'),store=browser.open();
   assert.equal(store.read().game,null);
   assert.match(store.warning,/could not be opened/);
-  await store.update(state=>settle(state));
+  store.read();
   assert.equal(browser.writes,0);
   await store.update(state=>act(state,'gideon','start',{revision:0}));
   assert.equal(store.warning,'');

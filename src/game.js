@@ -2,7 +2,6 @@ import { Chess } from 'chess.js';
 
 export const PLAYERS = ['gideon', 'grandpa'];
 export const NAMES = { gideon: 'Gideon', grandpa: 'Grandpa' };
-export const UNDO_MS = 10000;
 export const other = id => id === 'gideon' ? 'grandpa' : 'gideon';
 export class GameError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
@@ -24,25 +23,29 @@ function finish(state, winner, reason, now) {
   game.status = 'over'; game.result = {winner, reason, endedAt: now}; game.drawOffer = null;
   state.history.push({id: game.id, white: game.white, themes: game.themes, startedAt: game.startedAt, moves: game.moves, ...game.result});
 }
-export function settle(state, now = Date.now()) {
+function confirmMove(state, now) {
   const game = state.game;
-  if (!game?.pending || now < game.pending.readyAt) return null;
   const pending = game.pending;
   const chess = engine(game);
   const played = chess.move(pending.move);
-  game.moves.push({from: played.from, to: played.to, san: played.san, ...(played.promotion ? {promotion: played.promotion} : {}), player: pending.player, at: pending.readyAt});
+  game.moves.push({from: played.from, to: played.to, san: played.san, ...(played.promotion ? {promotion: played.promotion} : {}), player: pending.player, at: now});
   game.pending = null;
   if (game.drawOffer && game.drawOffer !== pending.player) game.drawOffer = null;
   let reason = null;
-  if (chess.isCheckmate()) finish(state, pending.player, reason = 'Checkmate', pending.readyAt);
-  else if (chess.isStalemate()) finish(state, null, reason = 'Stalemate', pending.readyAt);
-  else if (chess.isInsufficientMaterial()) finish(state, null, reason = 'Insufficient material', pending.readyAt);
-  else if (chess.isThreefoldRepetition()) finish(state, null, reason = 'Threefold repetition', pending.readyAt);
-  else if (chess.isDrawByFiftyMoves()) finish(state, null, reason = 'Fifty-move rule', pending.readyAt);
-  state.revision++;
-  // Only released moves that leave a playable turn produce reminders.
-  return game.status === 'active' ? {id: `${game.id}-${game.moves.length}`, recipient: other(pending.player), mover: pending.player, san: played.san, gameId: game.id, createdAt: pending.readyAt} : null;
+  if (chess.isCheckmate()) finish(state, pending.player, reason = 'Checkmate', now);
+  else if (chess.isStalemate()) finish(state, null, reason = 'Stalemate', now);
+  else if (chess.isInsufficientMaterial()) finish(state, null, reason = 'Insufficient material', now);
+  else if (chess.isThreefoldRepetition()) finish(state, null, reason = 'Threefold repetition', now);
+  else if (chess.isDrawByFiftyMoves()) finish(state, null, reason = 'Fifty-move rule', now);
 }
+export function turnNotification(state) {
+  const game=state.game, last=game?.moves.at(-1);
+  return game?.status==='active'&&!game.pending&&last ? {
+    id:`${game.id}-${game.moves.length}`, recipient:other(last.player), mover:last.player,
+    san:last.san, gameId:game.id, createdAt:last.at
+  } : null;
+}
+
 export function act(state, player, action, data = {}, now = Date.now(), randomBit = () => crypto.getRandomValues(new Uint8Array(1))[0] & 1) {
   requireThat(PLAYERS.includes(player), 'Invalid player.', 403);
   requireThat(Number.isInteger(data.revision) && data.revision === state.revision, 'The game changed. Refresh and try again.', 409);
@@ -61,18 +64,18 @@ export function act(state, player, action, data = {}, now = Date.now(), randomBi
     state.emails[player] = data.email.trim();
   } else {
     requireThat(game?.status === 'active', 'There is no active game.', 409);
-    if (action === 'undo') {
-      requireThat(game.pending && game.pending.player === player, 'Only your pending move can be undone.', 403);
-      requireThat(now < game.pending.readyAt, 'The 10-second undo window has closed.', 409);
-      game.pending = null;
+    if (action === 'change-move' || action === 'confirm') {
+      requireThat(game.pending && game.pending.player === player, 'Only your pending move can be changed or confirmed.', 403);
+      if(action==='confirm') confirmMove(state,now);
+      else game.pending=null;
     } else {
-      requireThat(!game.pending, 'Wait for the undo window to close.', 409);
+      requireThat(!game.pending, 'End your turn or change your pending move first.', 409);
       if (action === 'move') {
         requireThat(turnPlayer(game) === player, 'It is not your turn.', 403);
         requireThat(/^[a-h][1-8]$/.test(data.from || '') && /^[a-h][1-8]$/.test(data.to || '') && (!data.promotion || ['q','r','b','n'].includes(data.promotion)), 'Invalid move.');
         const move = {from: data.from, to: data.to, ...(data.promotion ? {promotion: data.promotion} : {})};
         try { engine(game).move(move); } catch { throw new GameError('That move is not legal.'); }
-        game.pending = {move, player, readyAt: now + UNDO_MS};
+        game.pending = {move, player};
       } else if (action === 'resign') {
         finish(state, other(player), 'Resignation', now);
       } else if (action === 'offer-draw') {
@@ -92,7 +95,7 @@ export function act(state, player, action, data = {}, now = Date.now(), randomBi
 }
 export function view(state, player, now = Date.now()) {
   const game = state.game ? structuredClone(state.game) : null;
-  if (game?.pending && game.pending.player !== player) game.pending = {player: game.pending.player, readyAt: game.pending.readyAt};
+  if (game?.pending && game.pending.player !== player) game.pending = {player: game.pending.player};
   const stats = Object.fromEntries(PLAYERS.map(p => [p, {wins: 0, losses: 0, draws: 0}]));
   for (const result of state.history) for (const p of PLAYERS) {
     if (!result.winner) stats[p].draws++;
